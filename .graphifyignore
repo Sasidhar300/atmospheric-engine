@@ -1,0 +1,9 @@
+.git/
+.venv/
+.venv-graphify/
+outputs/
+assets/
+graphify-out/
+.env*
+*.key
+*.pem

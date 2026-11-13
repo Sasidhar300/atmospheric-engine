@@ -1,0 +1,26 @@
+name: Rain Above Meridian
+duration: 90
+resolution: [1920, 1080]
+fps: 30
+seed: 431
+budget_usd: 5
+image_prompt: 'A cozy futuristic apartment overlooking a rainy neon city, {role}, 16:9 cinematic composition, amber practical lights, slate blue dusk'
+windows:
+  - [[0.303, 0.12], [0.932, 0.12], [0.932, 0.672], [0.303, 0.672]]
+occlusion:
+  - [[0.506, 0.12], [0.514, 0.12], [0.514, 0.672], [0.506, 0.672]]
+  - [[0.718, 0.12], [0.726, 0.12], [0.726, 0.672], [0.718, 0.672]]
+camera_pixels: 1.2
+effects: {rain: 0.45, haze: 0.10, flicker: 0.12, reflections: 0.35}
+music:
+  genre: cinematic ambient
+  mood: warm, unhurried, nocturnal
+  instrumentation: soft analog pads, brushed glass tones
+  tempo: 64
+  key: D minor
+  development: slow eight-section harmonic arc returning to the tonic
+  energy: low
+  forbidden: vocals, abrupt transients, drums
+environment:
+  rain: {gain: 0.105, low_hz: 420, high_hz: 7300, width: 0.8, automation: 0.14}
+  wind: {gain: 0.020, low_hz: 70, high_hz: 380, width: 0.6, automation: 0.20}
