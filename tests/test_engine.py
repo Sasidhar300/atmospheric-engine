@@ -1,4 +1,6 @@
 import base64
+from contextlib import redirect_stdout
+from io import StringIO
 import json
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -118,6 +120,48 @@ class EngineTests(unittest.TestCase):
         seam = render.probe(output/"seam_preview.mp4")
         self.assertAlmostEqual(float(seam["format"]["duration"]),4,places=2)
 
+    def test_default_runs_keep_artifacts_and_legacy_outputs(self):
+        outputs = self.root/"outputs"
+        outputs.mkdir()
+        legacy_report = outputs/"qc_report.json"
+        legacy_report.write_text("legacy pilot report")
+        project = outputs/"project"
+        demo = ["demo", "--scene", str(self.scene_file), "--duration", "2"]
+
+        def invoke(command):
+            stdout = StringIO()
+            with redirect_stdout(stdout):
+                main(command)
+            return json.loads(stdout.getvalue())
+
+        with patch("atmosphere.cli.DEFAULT_OUTPUT", outputs):
+            first_video = Path(invoke(demo)["video"])
+            second_video = Path(invoke(demo)["video"])
+            preview = invoke(demo + ["--preview"])
+            recheck = invoke(["qc", "--video", str(first_video)])
+            explicit = self.root/"recheck"
+            invoke(["qc", "--video", str(first_video), "--output", str(explicit)])
+
+        self.assertNotEqual(first_video, second_video)
+        for video in (first_video, second_video):
+            self.assertTrue(video.is_file())
+            run = video.parent.parent
+            self.assertEqual(run.parent, outputs/"runs")
+            for artifact in ("audio/music.wav", "audio/rain.wav", "audio/wind.wav",
+                             "audio/final_audio.wav", "previews/seam_preview.mp4",
+                             "qc/qc_report.json", "qc/seam_diagnostics.png"):
+                self.assertTrue((run/artifact).is_file(), artifact)
+        preview_video = Path(preview["video"])
+        self.assertEqual(preview_video.parent.name, "previews")
+        self.assertEqual(json.loads(preview_video.with_name("preview_report.json").read_text()), preview)
+        self.assertIn(preview["preview_id"], {row["id"] for row in Project(project).rows("asset")})
+        recheck_output = Path(recheck["output"])
+        self.assertEqual(recheck_output.parent.parent, outputs/"runs")
+        self.assertTrue((recheck_output/"qc_report.json").is_file())
+        self.assertTrue((recheck_output/"seam_diagnostics.png").is_file())
+        self.assertTrue((explicit/"qc_report.json").is_file())
+        self.assertEqual(legacy_report.read_text(), "legacy pilot report")
+
     def test_production_approval_gate(self):
         from atmosphere.cli import stage_originals
         project = Project(self.root/"project")
@@ -125,18 +169,22 @@ class EngineTests(unittest.TestCase):
         staged = stage_originals(project,scene)
         artwork, music = staged["artwork"], staged["music_candidates"][0]
         command = ["--project",str(project.root),"render","--scene",str(self.scene_file),
-                   "--duration","2","--output",str(self.root/"media"),
-                   "--artwork",artwork,"--music",music]
+                   "--duration","2","--artwork",artwork,"--music",music]
+        explicit = command+["--output",str(self.root/"media")]
         with self.assertRaises(SystemExit):
-            main(command)
+            main(explicit)
         project.review(artwork,"approved","Artwork inspected")
         project.review(music,"approved","Candidate reviewed")
         with self.assertRaises(SystemExit):
-            main(command)
-        main(command+["--preview"])
+            main(explicit)
+        main(explicit+["--preview"])
+        self.assertTrue((self.root/"media"/"production_preview.mp4").is_file())
         preview = project.rows("asset")[-1]["id"]
         project.review(preview,"approved","Test fixture approval")
-        main(command)
+        with patch("atmosphere.cli.DEFAULT_OUTPUT", self.root/"outputs"):
+            main(command)
+        video, = (self.root/"outputs"/"runs").glob("*/video/pilot.mp4")
+        self.assertTrue(video.is_file())
 
 
 if __name__ == "__main__":

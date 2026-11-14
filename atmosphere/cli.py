@@ -1,12 +1,13 @@
 """Local production and review commands."""
 import argparse
 from dataclasses import replace
+from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
 from subprocess import CalledProcessError
 import json
 import io
 from pathlib import Path
-from tempfile import TemporaryDirectory
+from tempfile import TemporaryDirectory, mkdtemp
 
 import numpy as np
 
@@ -16,6 +17,20 @@ from .project import Project, fingerprint
 from .providers import Generated, PROVIDERS
 
 DEFAULT_SCENE = "scenes/rainy_apartment.yaml"
+DEFAULT_OUTPUT = Path("outputs")
+
+
+def new_run(kind):
+    runs = DEFAULT_OUTPUT/"runs"
+    runs.mkdir(parents=True, exist_ok=True)
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    return Path(mkdtemp(prefix=f"{timestamp}-{kind}-", dir=runs))
+
+
+def output_folder(root, category, grouped):
+    folder = root/category if grouped else root
+    folder.mkdir(parents=True, exist_ok=True)
+    return folder
 
 
 def stage_originals(project, scene):
@@ -86,8 +101,6 @@ def recipe(args, scene, project, demo=False):
 def make_media(args, scene, project, demo):
     canvas, layers, mask, track, music_row, imports, chosen = recipe(args,scene,project,demo)
     recipe_key = fingerprint([scene.data,scene.duration,chosen,scene.fps])
-    output = Path(args.output)
-    output.mkdir(parents=True,exist_ok=True)
     is_preview = args.preview
     if not is_preview and not demo:
         reviewed = next((row for row in project.available("preview") if json.loads(row["spec"])["recipe"]==recipe_key),None)
@@ -115,8 +128,12 @@ def make_media(args, scene, project, demo):
             raise ValueError(f"Invalid stem name {name!r}")
         stems[name] = audio.environment(name,settings,duration,scene.seed+i,imports.get(name))
     mixed = audio.mix(stems.values())
-    video = output/("production_preview.mp4" if is_preview else "pilot_90s.mp4" if duration==90 else "pilot.mp4")
+    grouped = args.output is None
+    kind = f"{args.command}-preview" if is_preview else args.command
+    output = new_run(kind) if grouped else Path(args.output)
     if is_preview:
+        previews = output_folder(output, "previews", grouped)
+        video = previews/"production_preview.mp4"
         span = min(4*scene.fps,scene.frames//2)
         indices = list(range(scene.frames-span,scene.frames))+list(range(span))
         limit = span*(audio.RATE//scene.fps)
@@ -135,15 +152,22 @@ def make_media(args, scene, project, demo):
         preview_id = project.register("render",{"role":"preview","recipe":recipe_key,"assets":chosen,
                                                 "continuity":continuity},
                                       Generated(video.read_bytes(),".mp4",{}))
-        return {"video":str(video),"preview_id":preview_id,"loop_transition_seconds":span/scene.fps,
-                "manual_review":"pending","measured_transition":continuity,"ending_chroma_similarity":harmony}
+        report = {"video":str(video),"preview_id":preview_id,"loop_transition_seconds":span/scene.fps,
+                  "manual_review":"pending","measured_transition":continuity,"ending_chroma_similarity":harmony}
+        if grouped:
+            (previews/"preview_report.json").write_text(json.dumps(report,indent=2)+"\n")
+        return report
+    video = output_folder(output, "video", grouped)/("pilot_90s.mp4" if duration==90 else "pilot.mp4")
+    audio_output = output_folder(output, "audio", grouped)
+    previews = output_folder(output, "previews", grouped)
+    qc_output = output/"qc" if grouped else output
     for name,data in dict(stems,final_audio=mixed).items():
-        audio.write(output/f"{name}.wav",data)
-    render.stream(scene,compositor,output/"final_audio.wav",video)
-    render.seam_preview(video,scene.frames,scene.fps,output/"seam_preview.mp4")
-    report = qc.check(video,output,scene.frames,scene.fps,(scene.width,scene.height))
+        audio.write(audio_output/f"{name}.wav",data)
+    render.stream(scene,compositor,audio_output/"final_audio.wav",video)
+    render.seam_preview(video,scene.frames,scene.fps,previews/"seam_preview.mp4")
+    report = qc.check(video,qc_output,scene.frames,scene.fps,(scene.width,scene.height))
     report.update(asset_versions=chosen, demo_artwork=demo, music_ending_chroma_similarity=harmony)
-    (output/"qc_report.json").write_text(json.dumps(report,indent=2)+"\n")
+    (qc_output/"qc_report.json").write_text(json.dumps(report,indent=2)+"\n")
     return report
 
 
@@ -156,7 +180,7 @@ def ceiling_cents(value):
 
 def main(argv=None):
     parser = argparse.ArgumentParser(prog="atmosphere")
-    parser.add_argument("--project",default="outputs/project")
+    parser.add_argument("--project",default=DEFAULT_OUTPUT/"project")
     commands = parser.add_subparsers(dest="command",required=True)
     for command in ("demo","render","candidates","generate"):
         group = commands.add_parser(command)
@@ -164,7 +188,7 @@ def main(argv=None):
         group.add_argument("--duration",type=float)
         if command in {"demo","render"}:
             group.add_argument("--preview",action="store_true")
-            group.add_argument("--output",default="outputs")
+            group.add_argument("--output",help="Write directly to this directory")
             for role in ("artwork","music","mask","overlay","foreground"):
                 group.add_argument("--"+role)
             group.add_argument("--stem",action="append")
@@ -194,11 +218,14 @@ def main(argv=None):
     group.add_argument("actual_cents",type=int)
     group=commands.add_parser("qc")
     group.add_argument("--video",required=True)
-    group.add_argument("--output",default="outputs")
+    group.add_argument("--output",help="Write directly to this directory")
     args = parser.parse_args(argv)
     try:
         if args.command=="qc":
-            result = qc.check(args.video,args.output)
+            output = args.output if args.output is not None else new_run("qc")/"qc"
+            result = qc.check(args.video,output)
+            if args.output is None:
+                result["output"] = str(output)
         else:
             project = Project(args.project)
             scene = load(args.scene,args.duration) if hasattr(args,"scene") else None

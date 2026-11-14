@@ -16,6 +16,20 @@ python -m unittest discover -s tests -v
 
 Python streams RGB frames into FFmpeg. Pillow imports still images, NumPy manages deterministic clocks and synthesis, OpenCV composites each frame, and SciPy writes stereo WAVs and fits external music. FFmpeg encodes H.264/AAC and decodes the result for QC. The renderer uses CPU processing on Apple Silicon. Blender is a possible future adapter. The generated illustration and short candidates are stored under `outputs/project` with source and license metadata. Place your own source files under `assets/` or supply their paths directly.
 
+## Output locations
+
+`demo`, `render`, and `qc` each create a fresh directory in `outputs/runs/` by default. The directory name includes a UTC timestamp, the command, and a unique suffix. The JSON printed by the command includes the video path or, for standalone QC, the report directory.
+
+| Artifact | Location inside the run |
+| --- | --- |
+| Full video | `video/pilot_90s.mp4` or `video/pilot.mp4` |
+| Stems and final mix | `audio/` |
+| Seam preview | `previews/seam_preview.mp4` |
+| Production preview and its report | `previews/production_preview.mp4` and `previews/preview_report.json` |
+| QC report and diagnostics | `qc/qc_report.json` and `qc/seam_diagnostics.png` |
+
+Pass `--output DIR` to write directly into a directory with the original flat filenames. Reusing that directory can overwrite those files. Existing flat artifacts, including the original pilot evidence, are still readable at their original paths. The asset database, approved versions, and cost ledger live in the project store at `outputs/project/` by default. Use `--project DIR` before the command to select another store. User-supplied source media lives in `assets/`, and scene configurations live in `scenes/`.
+
 ## Production with reviewed media
 
 ```sh
@@ -52,7 +66,7 @@ OpenAI uses the GPT Image 2.6 Flare or Sunburst model, PNG output and an editabl
 ## Quality and release review
 
 ```sh
-python -m atmosphere qc --video outputs/pilot_90s.mp4 --output outputs/recheck
+python -m atmosphere qc --video path/to/pilot_90s.mp4
 ```
 
 - Watch `seam_preview.mp4` at normal speed. Its 32 seconds contain two copies of the last eight seconds followed by the first eight. Check window masks, occlusion, rain, lighting, reflections and camera motion at 0:08 and 0:24.
